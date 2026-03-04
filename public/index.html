@@ -4,7 +4,48 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PDF → Odoo</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js">
+// ── Auth ─────────────────────────────────────────────────
+(function checkSession() {
+  if (sessionStorage.getItem('auth') === '1') {
+    document.getElementById('loginScreen').style.display = 'none';
+  }
+})();
+
+async function doLogin() {
+  const pwd = document.getElementById('loginPwd').value;
+  const btn = document.getElementById('loginBtn');
+  const err = document.getElementById('loginErr');
+  if (!pwd) { err.textContent = 'Ingresa tu contraseña'; return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Verificando…';
+  err.textContent = '';
+
+  try {
+    const r = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      sessionStorage.setItem('auth', '1');
+      document.getElementById('loginScreen').style.display = 'none';
+    } else {
+      err.textContent = data.error || 'Contraseña incorrecta';
+      document.getElementById('loginPwd').value = '';
+      document.getElementById('loginPwd').focus();
+    }
+  } catch(e) {
+    err.textContent = 'Error de conexión';
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = 'Entrar';
+}
+
+</script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600&family=DM+Mono:wght@400;500&display=swap');
 
@@ -159,9 +200,64 @@ tbody tr:hover td { background:#f2eeea; }
 .spin { display:inline-block; width:13px; height:13px; border:2px solid rgba(255,255,255,.35); border-top-color:white; border-radius:50%; animation:spin .7s linear infinite; }
 @keyframes fadeUp { from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;} }
 .fu { animation:fadeUp .3s ease forwards; }
+
+/* ── Login ───────────────────────────────────────────────── */
+#loginScreen {
+  position:fixed; inset:0; z-index:500;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--bg);
+}
+#loginScreen::after {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:999; opacity:.5;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:200px 200px; mix-blend-mode:multiply;
+}
+.login-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:20px; padding:40px 36px; width:min(400px,90vw);
+  box-shadow:0 24px 60px rgba(0,0,0,.1); position:relative; z-index:1;
+}
+.login-card .eyebrow { margin-bottom:20px; }
+.login-card h2 { font-size:26px; font-weight:600; letter-spacing:-.02em; margin-bottom:6px; }
+.login-card h2 em { font-style:normal; color:var(--green); }
+.login-card p { font-size:13px; color:var(--muted); margin-bottom:28px; line-height:1.6; }
+.login-field { margin-bottom:16px; }
+.login-field label { display:block; font-family:'DM Mono',monospace; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:7px; }
+.login-field input {
+  width:100%; background:var(--bg); border:1.5px solid var(--border);
+  border-radius:11px; padding:13px 16px; font-family:'DM Mono',monospace;
+  font-size:14px; color:var(--text); outline:none; transition:border-color .2s;
+}
+.login-field input:focus { border-color:var(--green2); }
+.login-btn {
+  width:100%; padding:14px; background:var(--green); border:none;
+  border-radius:12px; color:white; font-family:'DM Sans',sans-serif;
+  font-size:15px; font-weight:600; cursor:pointer; transition:all .2s;
+  display:flex; align-items:center; justify-content:center; gap:8px; margin-top:4px;
+}
+.login-btn:hover:not(:disabled) { background:#2e5238; transform:translateY(-1px); box-shadow:0 6px 22px #3a664730; }
+.login-btn:disabled { opacity:.5; cursor:not-allowed; }
+.login-err { font-size:12.5px; color:#b84a36; margin-top:10px; text-align:center; min-height:18px; font-family:'DM Mono',monospace; }
 </style>
 </head>
 <body>
+
+<div id="loginScreen">
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="login-card">
+    <div class="eyebrow">🔒 acceso privado</div>
+    <h2>Bienvenido a<br><em>PDF → Odoo</em></h2>
+    <p>Herramienta interna de G Monterrey Industrial.<br>Ingresa tu contraseña para continuar.</p>
+    <div class="login-field">
+      <label>Contraseña</label>
+      <input type="password" id="loginPwd" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" autofocus />
+    </div>
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">Entrar</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+
 <div class="blob b1"></div>
 <div class="blob b2"></div>
 <div class="blob b3"></div>
@@ -614,6 +710,47 @@ function buildUBL(d){const cur=d.currency||'USD',lines=d.lines||[];const tax=Num
 function x(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');}
 function copyXML(){navigator.clipboard.writeText(xmlStr).then(()=>{const b=document.getElementById('bcopy');b.textContent='✓';setTimeout(()=>b.textContent='Copiar',2000);});}
 function dlXML(){const n=(invoiceData?.invoice_number||'factura')+'.xml';const blob=new Blob([xmlStr],{type:'application/xml'});const a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(blob),download:n});a.click();URL.revokeObjectURL(a.href);}
+
+// ── Auth ─────────────────────────────────────────────────
+(function checkSession() {
+  if (sessionStorage.getItem('auth') === '1') {
+    document.getElementById('loginScreen').style.display = 'none';
+  }
+})();
+
+async function doLogin() {
+  const pwd = document.getElementById('loginPwd').value;
+  const btn = document.getElementById('loginBtn');
+  const err = document.getElementById('loginErr');
+  if (!pwd) { err.textContent = 'Ingresa tu contraseña'; return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Verificando…';
+  err.textContent = '';
+
+  try {
+    const r = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      sessionStorage.setItem('auth', '1');
+      document.getElementById('loginScreen').style.display = 'none';
+    } else {
+      err.textContent = data.error || 'Contraseña incorrecta';
+      document.getElementById('loginPwd').value = '';
+      document.getElementById('loginPwd').focus();
+    }
+  } catch(e) {
+    err.textContent = 'Error de conexión';
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = 'Entrar';
+}
+
 </script>
 </body>
 </html>
