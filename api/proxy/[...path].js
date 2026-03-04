@@ -1,4 +1,4 @@
-export const config = { api: { bodyParser: true } };
+export const config = { api: { bodyParser: false } };
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,20 +16,39 @@ export default async function handler(req, res) {
   const fullUrl = odooUrl + odooPath;
 
   try {
+    const body = await new Promise((resolve, reject) => {
+      let data = '';
+      req.on('data', chunk => { data += chunk.toString(); });
+      req.on('end', () => resolve(data));
+      req.on('error', reject);
+    });
+
     console.log('→ POST', fullUrl);
-    console.log('→ Body:', JSON.stringify(req.body).substring(0, 200));
 
     const response = await fetch(fullUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body),
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'Accept': 'text/xml',
+      },
+      body: body,
+      redirect: 'follow',
     });
 
-    const data = await response.json();
+    const text = await response.text();
     console.log('← Status:', response.status);
-    console.log('← Result:', JSON.stringify(data).substring(0, 200));
+    console.log('← ContentType:', response.headers.get('content-type'));
+    console.log('← Preview:', text.substring(0, 150));
 
-    res.status(200).json(data);
+    // Detect HTML error page
+    if (text.trimStart().startsWith('<!') || text.trimStart().startsWith('<html')) {
+      return res.status(502).json({
+        error: `Odoo devolvió HTML (status ${response.status}). URL: ${fullUrl}`,
+      });
+    }
+
+    res.setHeader('Content-Type', 'text/xml');
+    res.status(200).send(text);
 
   } catch (err) {
     console.error('Proxy error:', err.message);
