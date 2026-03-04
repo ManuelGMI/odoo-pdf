@@ -11,8 +11,9 @@ export default async function handler(req, res) {
   const odooUrl = (process.env.ODOO_URL || '').replace(/\/+$/, '');
   if (!odooUrl) return res.status(500).json({ error: 'ODOO_URL no configurado' });
 
-  const pathParts = req.query.path || [];
-  const odooPath = '/' + (Array.isArray(pathParts) ? pathParts.join('/') : pathParts);
+  // Extract path from the URL directly — req.query.path can be unreliable
+  // req.url is like /api/proxy/xmlrpc/2/common
+  const odooPath = req.url.replace(/^\/api\/proxy/, '').split('?')[0] || '/';
   const fullUrl = odooUrl + odooPath;
 
   try {
@@ -23,6 +24,8 @@ export default async function handler(req, res) {
       req.on('error', reject);
     });
 
+    console.log('→ req.url:', req.url);
+    console.log('→ odooPath:', odooPath);
     console.log('→ POST', fullUrl);
 
     const response = await fetch(fullUrl, {
@@ -37,10 +40,8 @@ export default async function handler(req, res) {
 
     const text = await response.text();
     console.log('← Status:', response.status);
-    console.log('← ContentType:', response.headers.get('content-type'));
     console.log('← Preview:', text.substring(0, 150));
 
-    // Detect HTML error page
     if (text.trimStart().startsWith('<!') || text.trimStart().startsWith('<html')) {
       return res.status(502).json({
         error: `Odoo devolvió HTML (status ${response.status}). URL: ${fullUrl}`,
