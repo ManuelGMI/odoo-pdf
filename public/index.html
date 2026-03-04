@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF → Odoo</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600&family=DM+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg:      #ede9e2;
+  --surface: #f8f6f2;
+  --border:  #ddd8d0;
+  --text:    #1c1a16;
+  --muted:   #8a8478;
+  --green:   #3a6647;
+  --green2:  #5d9070;
+  --blue:    #1a4a8a;
+  --radius:  14px;
+}
+
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+
+body {
+  font-family:'DM Sans',sans-serif;
+  background:var(--bg); color:var(--text);
+  min-height:100vh; position:relative; overflow-x:hidden;
+}
+
+body::after {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:999; opacity:.5;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:200px 200px; mix-blend-mode:multiply;
+}
+
+.blob { position:fixed; border-radius:50%; filter:blur(90px); pointer-events:none; z-index:0; }
+.b1 { width:560px;height:560px;background:radial-gradient(circle,#a8d4b840,transparent 68%);top:-140px;right:-120px; }
+.b2 { width:440px;height:440px;background:radial-gradient(circle,#f2c8a038,transparent 68%);bottom:20px;left:-100px; }
+.b3 { width:320px;height:320px;background:radial-gradient(circle,#b8d8e438,transparent 68%);top:45%;left:38%; }
+
+.wrap { position:relative; z-index:1; max-width:760px; margin:0 auto; padding:56px 24px 90px; }
+
+header { margin-bottom:48px; }
+.eyebrow {
+  display:inline-flex; align-items:center; gap:6px;
+  font-family:'DM Mono',monospace; font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--green); background:#3a664712; border:1px solid #3a664726;
+  padding:4px 11px; border-radius:99px; margin-bottom:18px;
+}
+h1 { font-size:clamp(28px,4.5vw,42px); font-weight:600; line-height:1.12; letter-spacing:-.025em; margin-bottom:10px; }
+h1 em { font-style:normal; color:var(--green); }
+.sub { font-size:14px; color:var(--muted); font-weight:300; max-width:480px; line-height:1.7; }
+
+/* Steps */
+.steps-bar { display:flex; align-items:center; margin-bottom:36px; background:var(--surface); border:1px solid var(--border); border-radius:99px; padding:6px 8px; width:fit-content; }
+.step-pill { display:flex; align-items:center; gap:7px; padding:6px 14px; border-radius:99px; font-size:12px; font-weight:500; color:var(--muted); transition:all .2s; white-space:nowrap; }
+.step-pill.active { background:var(--green); color:white; }
+.step-pill.done   { color:var(--green); }
+.step-pill .sn { width:18px; height:18px; border-radius:50%; background:#c8c2b8; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.step-pill.active .sn { background:rgba(255,255,255,.3); }
+.step-pill.done   .sn { background:var(--green); }
+.step-pill .sn span { font-size:9px; font-weight:700; color:white; }
+.step-sep { width:20px; height:1px; background:var(--border); }
+
+/* card */
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:26px 28px; margin-bottom:14px; transition:box-shadow .2s; }
+.card:hover { box-shadow:0 4px 28px rgba(0,0,0,.06); }
+.clabel { font-family:'DM Mono',monospace; font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+.clabel::after { content:''; flex:1; height:1px; background:var(--border); }
+
+/* status row */
+.status-row { display:flex; align-items:center; gap:10px; font-size:13px; margin-bottom:8px; }
+.status-row:last-child { margin-bottom:0; }
+.dot { width:8px; height:8px; border-radius:50%; background:#c8c2b8; flex-shrink:0; }
+.dot.ok  { background:var(--green); box-shadow:0 0 0 3px #3a664720; }
+.dot.err { background:#c8503a; box-shadow:0 0 0 3px #c8503a18; }
+.dot.loading { background:#f0c040; animation:pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
+
+/* drop */
+.dz { border:1.5px dashed var(--border); border-radius:12px; padding:50px 32px; text-align:center; cursor:pointer; position:relative; transition:all .25s; }
+.dz input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+.dz:hover,.dz.over { border-color:var(--green2); background:#3a664706; }
+.dz-icon { font-size:34px; margin-bottom:10px; display:block; }
+.dz-title { font-size:15px; font-weight:500; margin-bottom:5px; }
+.dz-hint  { font-size:11.5px; color:var(--muted); font-family:'DM Mono',monospace; }
+.fpill { display:none; align-items:center; gap:9px; background:#3a664710; border:1px solid #3a664728; border-radius:9px; padding:9px 15px; margin-top:12px; font-size:12.5px; color:var(--green); font-family:'DM Mono',monospace; }
+
+/* buttons */
+.bconv { width:100%; padding:15px; background:var(--green); border:none; border-radius:var(--radius); color:white; font-family:'DM Sans',sans-serif; font-size:15px; font-weight:600; cursor:pointer; letter-spacing:-.01em; transition:all .2s; margin-bottom:14px; display:flex; align-items:center; justify-content:center; gap:8px; }
+.bconv:hover:not(:disabled) { background:#2e5238; transform:translateY(-1px); box-shadow:0 6px 22px #3a664730; }
+.bconv:disabled { opacity:.4; cursor:not-allowed; transform:none; box-shadow:none; }
+
+.bodoo { width:100%; padding:15px; background:var(--blue); border:none; border-radius:var(--radius); color:white; font-family:'DM Sans',sans-serif; font-size:15px; font-weight:600; cursor:pointer; letter-spacing:-.01em; transition:all .2s; margin-bottom:14px; display:flex; align-items:center; justify-content:center; gap:8px; }
+.bodoo:hover:not(:disabled) { background:#153d72; transform:translateY(-1px); box-shadow:0 6px 22px #1a4a8a30; }
+.bodoo:disabled { opacity:.4; cursor:not-allowed; transform:none; box-shadow:none; }
+
+/* log */
+.log { display:none; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-bottom:14px; }
+.log-in { background:var(--surface); padding:14px 18px; font-family:'DM Mono',monospace; font-size:11.5px; line-height:1.9; max-height:200px; overflow-y:auto; }
+.ll { display:flex; gap:10px; }
+.ll .ts { color:var(--muted); }
+.ll.ok   .ms { color:var(--green); }
+.ll.inf  .ms { color:#4a7a8c; }
+.ll.err  .ms { color:#b84a36; }
+.ll.warn .ms { color:#a07820; }
+
+/* extracted */
+.extr { display:none; margin-bottom:14px; }
+.chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+.chip { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px 13px; }
+.cl { font-family:'DM Mono',monospace; font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:3px; }
+.cv { font-size:13px; font-weight:500; color:var(--text); }
+.twrap { overflow-x:auto; border-radius:10px; border:1px solid var(--border); }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+thead th { text-align:left; padding:10px 13px; font-family:'DM Mono',monospace; font-size:9px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); background:var(--bg); border-bottom:1px solid var(--border); }
+tbody td { padding:11px 13px; border-bottom:1px solid var(--border); }
+tbody tr:last-child td { border-bottom:none; }
+tbody tr:hover td { background:#f2eeea; }
+.mono { font-family:'DM Mono',monospace; font-size:12px; }
+.right { text-align:right; }
+
+/* xml */
+.xout { display:none; margin-bottom:14px; }
+.xtb { display:flex; align-items:center; justify-content:space-between; padding:11px 18px; background:var(--bg); border:1px solid var(--border); border-bottom:none; border-radius:var(--radius) var(--radius) 0 0; }
+.xbadge { font-family:'DM Mono',monospace; font-size:10.5px; color:var(--green); display:flex; align-items:center; gap:6px; }
+.xbadge::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--green); }
+.xacts { display:flex; gap:8px; }
+.xbody { background:var(--surface); border:1px solid var(--border); border-radius:0 0 var(--radius) var(--radius); padding:18px; overflow:auto; max-height:260px; }
+.xbody pre { font-family:'DM Mono',monospace; font-size:11.5px; line-height:1.75; color:#52505a; white-space:pre; }
+
+.bsm { font-family:'DM Sans',sans-serif; font-size:12px; font-weight:500; padding:7px 15px; border-radius:9px; border:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; transition:all .15s; }
+.bsm:hover { background:var(--bg); border-color:var(--muted); }
+
+/* success */
+.success-banner { display:none; align-items:center; gap:14px; background:#edf7f0; border:1px solid #b0d8be; border-radius:var(--radius); padding:18px 22px; margin-bottom:14px; }
+.success-banner .si { font-size:28px; }
+.success-banner h3 { font-size:15px; font-weight:600; color:#1e4d30; margin-bottom:3px; }
+.success-banner p  { font-size:13px; color:#3a6647; }
+.success-banner a  { color:var(--green); font-weight:600; }
+
+/* confirm modal */
+.mbg { display:none; position:fixed; inset:0; background:rgba(24,20,14,.3); backdrop-filter:blur(8px); z-index:200; align-items:center; justify-content:center; }
+.mbg.open { display:flex; }
+.modal { background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:32px; width:min(500px,92vw); box-shadow:0 28px 70px rgba(0,0,0,.13); }
+.modal h2 { font-size:18px; font-weight:600; letter-spacing:-.01em; margin-bottom:6px; }
+.modal p  { font-size:13px; color:var(--muted); margin-bottom:20px; line-height:1.6; }
+.confirm-rows { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:14px 18px; margin-bottom:20px; }
+.cr { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:13px; }
+.cr:last-child { border-bottom:none; }
+.cr .ck { color:var(--muted); font-family:'DM Mono',monospace; font-size:11px; }
+.cr .cv2 { font-weight:500; }
+.macts { display:flex; gap:9px; justify-content:flex-end; }
+.bpri { padding:10px 22px; background:var(--green); border:none; border-radius:10px; color:white; font-family:'DM Sans',sans-serif; font-size:13.5px; font-weight:600; cursor:pointer; transition:background .2s; }
+.bpri:hover { background:#2e5238; }
+
+@keyframes spin { to{transform:rotate(360deg);} }
+.spin { display:inline-block; width:13px; height:13px; border:2px solid rgba(255,255,255,.35); border-top-color:white; border-radius:50%; animation:spin .7s linear infinite; }
+@keyframes fadeUp { from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;} }
+.fu { animation:fadeUp .3s ease forwards; }
+</style>
+</head>
+<body>
+<div class="blob b1"></div>
+<div class="blob b2"></div>
+<div class="blob b3"></div>
+
+<!-- Confirm modal -->
+<div class="mbg" id="confirmBg">
+  <div class="modal">
+    <h2>Confirmar envío a Odoo</h2>
+    <p>Se creará una factura de proveedor en <strong>borrador</strong>. Podrás revisarla antes de confirmarla.</p>
+    <div class="confirm-rows" id="confirmRows"></div>
+    <div class="macts">
+      <button class="bsm" onclick="closeConfirm()">Cancelar</button>
+      <button class="bpri" onclick="doSendOdoo()">Enviar a Odoo</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">⚡ G Monterrey Industrial</div>
+    <h1>Facturas PDF<br>→ <em>Odoo</em></h1>
+    <p class="sub">Extrae datos de facturas de proveedores extranjeros y las crea directamente en Odoo como borrador.</p>
+  </header>
+
+  <!-- Steps -->
+  <div class="steps-bar">
+    <div class="step-pill active" id="sp1"><div class="sn"><span>1</span></div> PDF</div>
+    <div class="step-sep"></div>
+    <div class="step-pill" id="sp2"><div class="sn"><span>2</span></div> Extraer</div>
+    <div class="step-sep"></div>
+    <div class="step-pill" id="sp3"><div class="sn"><span>3</span></div> Odoo</div>
+  </div>
+
+  <!-- Status card -->
+  <div class="card" id="statusCard">
+    <div class="clabel">Estado del sistema</div>
+    <div class="status-row">
+      <span class="dot loading" id="dOai"></span>
+      <span id="tOai" style="color:var(--muted);font-size:13px;">Verificando OpenAI…</span>
+    </div>
+    <div class="status-row">
+      <span class="dot loading" id="dOdoo"></span>
+      <span id="tOdoo" style="color:var(--muted);font-size:13px;">Verificando Odoo…</span>
+    </div>
+  </div>
+
+  <!-- Drop -->
+  <div class="card">
+    <div class="clabel">Factura PDF</div>
+    <div class="dz" id="dz">
+      <input type="file" id="fi" accept=".pdf" />
+      <span class="dz-icon">📄</span>
+      <div class="dz-title">Arrastra tu factura aquí</div>
+      <div class="dz-hint">o haz clic · solo .pdf</div>
+    </div>
+    <div class="fpill" id="fpill"><span>📎</span><span id="fpname"></span></div>
+  </div>
+
+  <button class="bconv" id="bconv" disabled onclick="runExtract()">Extraer datos del PDF</button>
+
+  <div class="log" id="log"><div class="log-in" id="logIn"></div></div>
+
+  <!-- Extracted -->
+  <div class="extr card fu" id="extr">
+    <div class="clabel">Datos extraídos</div>
+    <div class="chips" id="chips"></div>
+    <div class="twrap">
+      <table>
+        <thead><tr>
+          <th>Ref. Interna</th><th>Descripción</th><th>Qty</th><th>UdM</th><th>Precio Unit.</th><th>Total</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- XML backup -->
+  <div class="xout fu" id="xout">
+    <div class="xtb">
+      <span class="xbadge">UBL 2.1 — respaldo XML</span>
+      <div class="xacts">
+        <button class="bsm" id="bcopy" onclick="copyXML()">Copiar</button>
+        <button class="bsm" style="background:var(--green);color:white;border-color:var(--green)" onclick="dlXML()">⬇ .xml</button>
+      </div>
+    </div>
+    <div class="xbody"><pre id="xpre"></pre></div>
+  </div>
+
+  <button class="bodoo" id="bodoo" disabled onclick="confirmSend()">Crear factura en Odoo</button>
+
+  <!-- Success -->
+  <div class="success-banner fu" id="successBanner">
+    <div class="si">✅</div>
+    <div>
+      <h3>¡Factura creada en Odoo!</h3>
+      <p id="successMsg">Creada como borrador.</p>
+    </div>
+  </div>
+
+</div>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+let oaiKey = '';
+let pdfFile = null, xmlStr = '', invoiceData = null, odooUid = null;
+
+// ── On load: fetch config from server env vars ────────────
+addEventListener('DOMContentLoaded', async () => {
+  try {
+    const r = await fetch('/api/config');
+    const cfg = await r.json();
+
+    oaiKey = cfg.oaiKey || '';
+    const odooOk = cfg.odooOk;
+
+    setDot('dOai', 'tOai', !!oaiKey,
+      oaiKey ? 'OpenAI configurado ✓' : 'OPENAI_API_KEY no configurado en Vercel');
+    setDot('dOdoo', 'tOdoo', odooOk,
+      odooOk ? `Odoo configurado ✓  (${cfg.odooUrl})` : 'Credenciales Odoo no configuradas en Vercel');
+
+  } catch(e) {
+    setDot('dOai',  'tOai',  false, 'Error al cargar configuración');
+    setDot('dOdoo', 'tOdoo', false, 'Error al cargar configuración');
+  }
+  chk();
+});
+
+function setDot(dotId, textId, ok, msg) {
+  document.getElementById(dotId).className = 'dot ' + (ok ? 'ok' : 'err');
+  const el = document.getElementById(textId);
+  el.textContent = msg;
+  el.style.color = ok ? 'var(--text)' : '#b84a36';
+}
+
+// ── Steps ─────────────────────────────────────────────────
+function setStep(n) {
+  [1,2,3].forEach(i => {
+    const el = document.getElementById('sp'+i);
+    el.className = 'step-pill' + (i<n?' done':i===n?' active':'');
+    el.querySelector('.sn span').textContent = i < n ? '✓' : String(i);
+  });
+}
+
+// ── File ──────────────────────────────────────────────────
+const dz = document.getElementById('dz'), fi = document.getElementById('fi');
+dz.addEventListener('dragover', e=>{e.preventDefault();dz.classList.add('over');});
+dz.addEventListener('dragleave', ()=>dz.classList.remove('over'));
+dz.addEventListener('drop', e=>{e.preventDefault();dz.classList.remove('over');const f=e.dataTransfer.files[0];if(f?.type==='application/pdf')setF(f);});
+fi.addEventListener('change', e=>{if(e.target.files[0])setF(e.target.files[0]);});
+
+function setF(f) {
+  pdfFile = f;
+  document.getElementById('fpname').textContent = `${f.name}  ·  ${(f.size/1024).toFixed(1)} KB`;
+  document.getElementById('fpill').style.display = 'flex';
+  chk();
+}
+
+function chk() {
+  document.getElementById('bconv').disabled = !(oaiKey && pdfFile);
+}
+
+// ── Log ───────────────────────────────────────────────────
+function lg(msg, t='inf') {
+  const w=document.getElementById('log'), i=document.getElementById('logIn');
+  w.style.display='block';
+  const now=new Date().toLocaleTimeString('es-MX',{hour12:false});
+  const d=document.createElement('div');
+  d.className=`ll ${t}`;
+  d.innerHTML=`<span class="ts">${now}</span><span class="ms">${msg}</span>`;
+  i.appendChild(d); i.scrollTop=i.scrollHeight;
+}
+
+// ── PDF ───────────────────────────────────────────────────
+async function extractText(f) {
+  const buf=await f.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  let txt='';
+  for(let i=1;i<=pdf.numPages;i++){
+    const pg=await pdf.getPage(i);
+    const c=await pg.getTextContent();
+    txt+=c.items.map(s=>s.str).join(' ')+'\n';
+  }
+  return txt;
+}
+
+// ── Extract ───────────────────────────────────────────────
+async function runExtract() {
+  const btn=document.getElementById('bconv');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> Extrayendo…';
+  ['log','extr','xout'].forEach(id=>{ const el=document.getElementById(id); if(id==='log'){el.style.display='none';document.getElementById('logIn').innerHTML='';}else el.style.display='none'; });
+  document.getElementById('bodoo').disabled=true;
+  document.getElementById('successBanner').style.display='none';
+
+  try {
+    lg('Leyendo PDF…');
+    const txt = await extractText(pdfFile);
+    lg(`${txt.length} caracteres extraídos`,'ok');
+    lg('Analizando con GPT-4o…');
+
+    const r = await fetch('https://api.openai.com/v1/chat/completions',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':`Bearer ${oaiKey}`},
+      body:JSON.stringify({
+        model:'gpt-4o', max_tokens:2000, temperature:0,
+        messages:[{role:'user',content:`Eres un experto en facturas comerciales internacionales.
+Extrae TODOS los datos. Responde SOLO con JSON válido, sin texto ni markdown.
+
+{
+  "invoice_number":"","invoice_date":"YYYY-MM-DD","due_date":"YYYY-MM-DD","currency":"",
+  "supplier":{"name":"","address":"","tax_id":"","email":"","phone":""},
+  "buyer":{"name":"","address":"","tax_id":"","email":"","phone":""},
+  "lines":[{"item_code":"","description":"","quantity":0,"unit":"EA","unit_price":0,"total":0,"hs_code":""}],
+  "subtotal":0,"tax_amount":0,"total":0,"trade_terms":"","notes":""
+}
+
+REGLAS:
+- item_code = código de referencia interna (ej: 20F1AND125JA0NNNNN)
+- subtotal = total cuando tax_amount=0 (importación extranjera)
+- Fechas en YYYY-MM-DD
+
+FACTURA:
+${txt}`}]
+      })
+    });
+    if(!r.ok){const e=await r.json();throw new Error(e.error?.message||r.statusText);}
+
+    const resp=await r.json();
+    let raw=resp.choices[0].message.content.trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+    invoiceData=JSON.parse(raw);
+    if(!invoiceData.tax_amount||invoiceData.tax_amount===0) invoiceData.subtotal=invoiceData.total;
+
+    lg('Datos extraídos correctamente','ok');
+    renderData(invoiceData);
+    xmlStr=buildUBL(invoiceData);
+    document.getElementById('xout').style.display='block';
+    document.getElementById('xpre').textContent=xmlStr;
+    setStep(2);
+    document.getElementById('bodoo').disabled=false;
+    lg('Listo — revisa y envía a Odoo','ok');
+
+  } catch(e){ lg(`Error: ${e.message}`,'err'); console.error(e); }
+  btn.disabled=false; btn.innerHTML='Extraer datos del PDF';
+}
+
+function renderData(d) {
+  document.getElementById('extr').style.display='block';
+  const defs=[['No. Factura',d.invoice_number],['Fecha',d.invoice_date],['Moneda',d.currency],['Proveedor',d.supplier?.name],['RFC',d.buyer?.tax_id||'N/A'],['Subtotal',fm(d.subtotal,d.currency)],['Impuestos',fm(d.tax_amount,d.currency)],['Total',fm(d.total,d.currency)],['Términos',d.trade_terms||'N/A']];
+  document.getElementById('chips').innerHTML=defs.map(([l,v])=>`<div class="chip"><div class="cl">${l}</div><div class="cv">${v||'—'}</div></div>`).join('');
+  document.getElementById('tbody').innerHTML=(d.lines||[]).map(ln=>`<tr><td class="mono">${ln.item_code||'—'}</td><td>${ln.description}</td><td class="right">${ln.quantity}</td><td class="mono">${ln.unit||'EA'}</td><td class="right mono">${fm(ln.unit_price,d.currency)}</td><td class="right mono">${fm(ln.total,d.currency)}</td></tr>`).join('');
+}
+
+function fm(v,cur){if(v===undefined||v===null)return'—';return`${cur||''} ${Number(v).toFixed(2)}`;}
+
+// ── Confirm ───────────────────────────────────────────────
+function confirmSend() {
+  const d=invoiceData;
+  document.getElementById('confirmRows').innerHTML=`
+    <div class="cr"><span class="ck">Proveedor</span><span class="cv2">${d.supplier?.name||'—'}</span></div>
+    <div class="cr"><span class="ck">No. Factura</span><span class="cv2">${d.invoice_number||'—'}</span></div>
+    <div class="cr"><span class="ck">Fecha</span><span class="cv2">${d.invoice_date||'—'}</span></div>
+    <div class="cr"><span class="ck">Moneda</span><span class="cv2">${d.currency||'—'}</span></div>
+    <div class="cr"><span class="ck">Total</span><span class="cv2">${fm(d.total,d.currency)}</span></div>
+    <div class="cr"><span class="ck">Líneas</span><span class="cv2">${(d.lines||[]).length} producto(s)</span></div>`;
+  document.getElementById('confirmBg').classList.add('open');
+}
+function closeConfirm(){document.getElementById('confirmBg').classList.remove('open');}
+
+// ── Send to Odoo (via /api/proxy) ─────────────────────────
+async function doSendOdoo() {
+  closeConfirm();
+  const btn=document.getElementById('bodoo');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> Enviando a Odoo…';
+  document.getElementById('successBanner').style.display='none';
+
+  try {
+    lg('Autenticando en Odoo…');
+    if(!odooUid) odooUid=await odooAuth();
+    lg(`Autenticado — UID: ${odooUid}`,'ok');
+
+    lg(`Buscando proveedor: ${invoiceData.supplier?.name}…`);
+    const partnerId=await findOrCreatePartner(invoiceData.supplier);
+    lg(`Proveedor ID: ${partnerId}`,'ok');
+
+    lg(`Resolviendo moneda: ${invoiceData.currency}…`);
+    const currencyId=await findCurrency(invoiceData.currency||'USD');
+    lg(`Moneda ID: ${currencyId}`,'ok');
+
+    lg('Preparando líneas…');
+    const lines=await buildOdooLines(invoiceData.lines||[]);
+
+    lg('Creando factura…');
+    const invoiceId=await odooCreate('account.move',{
+      move_type:'in_invoice',
+      partner_id:partnerId,
+      invoice_date:invoiceData.invoice_date||false,
+      invoice_date_due:invoiceData.due_date||false,
+      ref:invoiceData.invoice_number||'',
+      currency_id:currencyId,
+      narration:[invoiceData.trade_terms,invoiceData.notes].filter(Boolean).join(' | ')||false,
+      invoice_line_ids:lines,
+    });
+
+    lg(`✓ Factura creada — ID: ${invoiceId}`,'ok');
+    setStep(3);
+
+    const odooUrl = (await (await fetch('/api/config')).json()).odooUrl;
+    const link=`${odooUrl}/odoo/accounting/vendor-bills/${invoiceId}`;
+    const sb=document.getElementById('successBanner');
+    sb.style.display='flex';
+    document.getElementById('successMsg').innerHTML=`Creada como borrador (ID: ${invoiceId}). <a href="${link}" target="_blank">Abrir en Odoo →</a>`;
+
+  } catch(e){ lg(`Error: ${e.message}`,'err'); console.error(e); }
+  btn.disabled=false; btn.innerHTML='Crear factura en Odoo';
+}
+
+// ── XML-RPC via /api/proxy ────────────────────────────────
+function xmlrpc(endpoint, method, params) {
+  return fetch(`/api/proxy${endpoint}`,{
+    method:'POST',
+    headers:{'Content-Type':'text/xml'},
+    body:`<?xml version="1.0"?><methodCall><methodName>${method}</methodName><params>${params}</params></methodCall>`
+  }).then(async r=>{
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    return parseXmlRpc(await r.text());
+  });
+}
+
+function v(val) {
+  if(val===false||val===null) return '<value><boolean>0</boolean></value>';
+  if(typeof val==='number'&&Number.isInteger(val)) return `<value><int>${val}</int></value>`;
+  if(typeof val==='number') return `<value><double>${val}</double></value>`;
+  if(typeof val==='boolean') return `<value><boolean>${val?1:0}</boolean></value>`;
+  if(Array.isArray(val)) return `<value><array><data>${val.map(v).join('')}</data></array></value>`;
+  if(typeof val==='object'&&val!==null) return `<value><struct>${Object.entries(val).map(([k,vv])=>`<member><n>${k}</n>${v(vv)}</member>`).join('')}</struct></value>`;
+  return `<value><string>${String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</string></value>`;
+}
+
+async function odooAuth() {
+  const uid=await xmlrpc('/xmlrpc/2/common','authenticate',
+    `<param>${v(await getOdooDb())}</param><param>${v(await getOdooUser())}</param><param>${v(await getOdooKey())}</param><param>${v({})}</param>`);
+  if(!uid||uid===false) throw new Error('Autenticación fallida — verifica variables de entorno en Vercel');
+  return uid;
+}
+
+// Odoo credentials come from server via /api/config (never exposed in JS)
+let _cfg = null;
+async function getCfg() {
+  if(!_cfg) _cfg = await (await fetch('/api/config')).json();
+  return _cfg;
+}
+async function getOdooDb()   { return (await getCfg()).odooDb; }
+async function getOdooUser() { return (await getCfg()).odooUser; }
+async function getOdooKey()  { return (await getCfg()).odooKey; }
+
+async function odooSearch(model,domain) {
+  const cfg=await getCfg();
+  const res=await xmlrpc('/xmlrpc/2/object','execute_kw',
+    `<param>${v(cfg.odooDb)}</param><param>${v(odooUid)}</param><param>${v(cfg.odooKey)}</param>
+     <param>${v(model)}</param><param>${v('search')}</param>
+     <param><value><array><data>${v(domain)}</data></array></value></param>`);
+  return Array.isArray(res)?res:[];
+}
+
+async function odooCreate(model,data) {
+  const cfg=await getCfg();
+  return xmlrpc('/xmlrpc/2/object','execute_kw',
+    `<param>${v(cfg.odooDb)}</param><param>${v(odooUid)}</param><param>${v(cfg.odooKey)}</param>
+     <param>${v(model)}</param><param>${v('create')}</param>
+     <param><value><array><data>${v(data)}</data></array></value></param>`);
+}
+
+async function findOrCreatePartner(supplier) {
+  const name=supplier?.name||'Proveedor Desconocido';
+  let ids=await odooSearch('res.partner',[['name','ilike',name],['supplier_rank','>',0]]);
+  if(!ids.length) ids=await odooSearch('res.partner',[['name','ilike',name]]);
+  if(ids.length) return ids[0];
+  lg(`Proveedor no encontrado, creando: ${name}`,'warn');
+  return odooCreate('res.partner',{name,supplier_rank:1,street:supplier?.address||false,email:supplier?.email||false,phone:supplier?.phone||false,vat:supplier?.tax_id||false});
+}
+
+async function findCurrency(code) {
+  const ids=await odooSearch('res.currency',[['name','=',code]]);
+  if(ids.length) return ids[0];
+  lg(`Moneda ${code} no encontrada, usando USD`,'warn');
+  const usd=await odooSearch('res.currency',[['name','=','USD']]);
+  return usd[0]||2;
+}
+
+async function buildOdooLines(lines) {
+  const result=[];
+  for(const ln of lines){
+    let productId=false;
+    if(ln.item_code){const ids=await odooSearch('product.product',[['default_code','=',ln.item_code]]);if(ids.length){productId=ids[0];lg(`Producto encontrado: ${ln.item_code}`,'ok');}}
+    if(!productId&&ln.description){const ids=await odooSearch('product.product',[['name','ilike',ln.description.substring(0,30)]]);if(ids.length){productId=ids[0];lg('Producto encontrado por nombre','ok');}}
+    if(!productId) lg(`Sin producto coincidente (${ln.item_code||ln.description}), línea sin producto`,'warn');
+    result.push([0,0,{product_id:productId||false,name:ln.description||ln.item_code||'Producto',quantity:Number(ln.quantity)||1,price_unit:Number(ln.unit_price)||0,tax_ids:[[6,0,[]]]}]);
+  }
+  return result;
+}
+
+function parseXmlRpc(xml) {
+  const doc=new DOMParser().parseFromString(xml,'text/xml');
+  const fault=doc.querySelector('fault');
+  if(fault) throw new Error(doc.querySelector('fault string')?.textContent||'Error XML-RPC');
+  const el=doc.querySelector('methodResponse > params > param > value');
+  if(!el) throw new Error('Respuesta XML-RPC inválida');
+  return pv(el);
+}
+function pv(el){const c=el.children[0];if(!c)return el.textContent.trim();switch(c.tagName){case 'int':case 'i4':case 'i8':return parseInt(c.textContent);case 'double':return parseFloat(c.textContent);case 'boolean':return c.textContent.trim()==='1';case 'string':return c.textContent;case 'nil':return false;case 'array':{const d=c.querySelector('data');return d?[...d.children].map(pv):[];}case 'struct':{const o={};c.querySelectorAll(':scope > member').forEach(m=>{const k=m.querySelector('name')?.textContent,vv=m.querySelector('value');if(k&&vv)o[k]=pv(vv);});return o;}default:return c.textContent;}}
+
+function buildUBL(d){const cur=d.currency||'USD',lines=d.lines||[];const tax=Number(d.tax_amount||0).toFixed(2),sub=Number(d.subtotal||d.total||0).toFixed(2),tot=Number(d.total||0).toFixed(2);const today=new Date().toISOString().split('T')[0];const lx=lines.map((ln,i)=>`\n  <cac:InvoiceLine>\n    <cbc:ID>${i+1}</cbc:ID>\n    <cbc:InvoicedQuantity unitCode="${ln.unit||'EA'}">${ln.quantity}</cbc:InvoicedQuantity>\n    <cbc:LineExtensionAmount currencyID="${cur}">${Number(ln.total).toFixed(2)}</cbc:LineExtensionAmount>\n    <cac:Item><cbc:Description>${x(ln.description)}</cbc:Description>${ln.item_code?`<cac:SellersItemIdentification><cbc:ID>${x(ln.item_code)}</cbc:ID></cac:SellersItemIdentification>`:''}</cac:Item>\n    <cac:Price><cbc:PriceAmount currencyID="${cur}">${Number(ln.unit_price).toFixed(2)}</cbc:PriceAmount></cac:Price>\n  </cac:InvoiceLine>`).join('');return`<?xml version="1.0" encoding="UTF-8"?>\n<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">\n  <cbc:UBLVersionID>2.1</cbc:UBLVersionID>\n  <cbc:ID>${x(d.invoice_number||'INV-'+today)}</cbc:ID>\n  <cbc:IssueDate>${d.invoice_date||today}</cbc:IssueDate>\n  <cbc:DueDate>${d.due_date||d.invoice_date||today}</cbc:DueDate>\n  <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>\n  <cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>\n  <cac:TaxTotal><cbc:TaxAmount currencyID="${cur}">${tax}</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount currencyID="${cur}">${sub}</cbc:TaxableAmount><cbc:TaxAmount currencyID="${cur}">${tax}</cbc:TaxAmount><cac:TaxCategory><cbc:ID>Z</cbc:ID><cbc:Percent>0</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>\n  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="${cur}">${sub}</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="${cur}">${sub}</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="${cur}">${tot}</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="${cur}">${tot}</cbc:PayableAmount></cac:LegalMonetaryTotal>\n  ${lx}\n</Invoice>`;}
+function x(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');}
+function copyXML(){navigator.clipboard.writeText(xmlStr).then(()=>{const b=document.getElementById('bcopy');b.textContent='✓';setTimeout(()=>b.textContent='Copiar',2000);});}
+function dlXML(){const n=(invoiceData?.invoice_number||'factura')+'.xml';const blob=new Blob([xmlStr],{type:'application/xml'});const a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(blob),download:n});a.click();URL.revokeObjectURL(a.href);}
+</script>
+</body>
+</html>
