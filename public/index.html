@@ -565,11 +565,12 @@ async function buildOdooLines(lines) {
 }
 
 function parseXmlRpc(xml) {
+  console.log("XML-RPC raw response:", xml.substring(0, 800));
   const doc=new DOMParser().parseFromString(xml,'text/xml');
   const fault=doc.querySelector('fault');
   if(fault) throw new Error(doc.querySelector('fault string')?.textContent||'Error XML-RPC');
   const el=doc.querySelector('methodResponse > params > param > value');
-  if(!el) throw new Error('Respuesta XML-RPC inválida');
+  if(!el) throw new Error("Respuesta XML-RPC inválida — ver consola F12 para el XML raw");
   return pv(el);
 }
 function pv(el){const c=el.children[0];if(!c)return el.textContent.trim();switch(c.tagName){case 'int':case 'i4':case 'i8':return parseInt(c.textContent);case 'double':return parseFloat(c.textContent);case 'boolean':return c.textContent.trim()==='1';case 'string':return c.textContent;case 'nil':return false;case 'array':{const d=c.querySelector('data');return d?[...d.children].map(pv):[];}case 'struct':{const o={};c.querySelectorAll(':scope > member').forEach(m=>{const k=m.querySelector('name')?.textContent,vv=m.querySelector('value');if(k&&vv)o[k]=pv(vv);});return o;}default:return c.textContent;}}
