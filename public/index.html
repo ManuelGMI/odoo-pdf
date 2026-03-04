@@ -536,11 +536,12 @@ async function odooSearch(model, domain) {
 
 async function odooWrite(model, id, data) {
   const cfg = await getCfg();
+  // write(ids, vals) - ids as array, vals as single dict, empty kwargs {}
   return xmlrpc('/xmlrpc/2/object', 'execute_kw',
     `<param>${val(cfg.odooDb)}</param><param>${val(odooUid)}</param><param>${val(cfg.odooKey)}</param>` +
     `<param>${val(model)}</param><param>${val('write')}</param>` +
-    `<param><value><array><data>${val([id])}</data></array></value></param>` +
-    `<param><value><array><data>${val(data)}</data></array></value></param>`
+    `<param><value><array><data><value><array><data>${val(id)}</data></array></value>${val(data)}</data></array></value></param>` +
+    `<param>${val({})}</param>`
   );
 }
 
