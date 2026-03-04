@@ -581,7 +581,6 @@ async function buildOdooLines(lines) {
       name: ln.description || ln.item_code || 'Producto',
       quantity: Number(ln.quantity) || 1,
       price_unit: Number(ln.unit_price) || 0,
-      tax_ids: [[6, 0, []]],
     }]);
   }
   return result;
