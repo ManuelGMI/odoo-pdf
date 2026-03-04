@@ -458,7 +458,6 @@ async function doSendOdoo() {
 
     lg('Creando factura…');
     const invoiceId=await odooCreate('account.move',{
-      move_type:'in_invoice',
       partner_id:partnerId,
       invoice_date:invoiceData.invoice_date||false,
       invoice_date_due:invoiceData.due_date||false,
@@ -466,6 +465,7 @@ async function doSendOdoo() {
       currency_id:currencyId,
       narration:[invoiceData.trade_terms,invoiceData.notes].filter(Boolean).join(' | ')||false,
       invoice_line_ids:lines,
+      move_type:'in_invoice',
     });
 
     lg(`✓ Factura creada — ID: ${invoiceId}`,'ok');
