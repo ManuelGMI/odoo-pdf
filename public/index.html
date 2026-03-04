@@ -481,64 +481,63 @@ async function doSendOdoo() {
   btn.disabled=false; btn.innerHTML='Crear factura en Odoo';
 }
 
-// ── JSON-RPC via /api/proxy ──────────────────────────────
+// ── XML-RPC via /api/proxy ──────────────────────────────
 let _cfg = null;
 async function getCfg() {
   if(!_cfg) _cfg = await (await fetch('/api/config')).json();
   return _cfg;
 }
 
-async function odooRpc(endpoint, method, kwargs={}) {
-  const cfg = await getCfg();
-  const body = {
-    jsonrpc: '2.0', method: 'call', id: Date.now(),
-    params: {
-      service: endpoint === '/web/dataset/call_kw' ? undefined : endpoint,
-      method, kwargs,
-      ...kwargs
-    }
-  };
-
-  const r = await fetch(`/api/proxy${endpoint}`, {
+function xmlrpc(endpoint, method, params) {
+  return fetch(`/api/proxy${endpoint}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc:'2.0', method:'call', id:Date.now(), params: kwargs })
+    headers: { 'Content-Type': 'text/xml' },
+    body: `<?xml version="1.0"?><methodCall><methodName>${method}</methodName><params>${params}</params></methodCall>`
+  }).then(async r => {
+    if (!r.ok) {
+      const err = await r.json().catch(() => null);
+      throw new Error(err?.error || `HTTP ${r.status}`);
+    }
+    return parseXmlRpc(await r.text());
   });
+}
 
-  if (!r.ok) {
-    const err = await r.json().catch(()=>({error:{message:`HTTP ${r.status}`}}));
-    throw new Error(err.error || `HTTP ${r.status}`);
-  }
-
-  const data = await r.json();
-  if (data.error) throw new Error(data.error.data?.message || data.error.message || JSON.stringify(data.error));
-  return data.result;
+function val(v) {
+  if (v === false || v === null) return '<value><boolean>0</boolean></value>';
+  if (typeof v === 'number' && Number.isInteger(v)) return `<value><int>${v}</int></value>`;
+  if (typeof v === 'number') return `<value><double>${v}</double></value>`;
+  if (typeof v === 'boolean') return `<value><boolean>${v?1:0}</boolean></value>`;
+  if (Array.isArray(v)) return `<value><array><data>${v.map(val).join('')}</data></array></value>`;
+  if (typeof v === 'object' && v !== null) return `<value><struct>${Object.entries(v).map(([k,vv])=>`<member><n>${k}</n>${val(vv)}</member>`).join('')}</struct></value>`;
+  return `<value><string>${String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</string></value>`;
 }
 
 async function odooAuth() {
   const cfg = await getCfg();
-  const result = await odooRpc('/web/session/authenticate', 'call', {
-    db: cfg.odooDb,
-    login: cfg.odooUser,
-    password: cfg.odooKey,
-  });
-  if (!result || !result.uid) throw new Error('Autenticación fallida — verifica credenciales en Vercel');
-  return result.uid;
-}
-
-async function odooCall(model, method, args=[], kwargs={}) {
-  return odooRpc('/web/dataset/call_kw', 'call', {
-    model, method, args, kwargs
-  });
+  const uid = await xmlrpc('/xmlrpc/2/common', 'authenticate',
+    `<param>${val(cfg.odooDb)}</param><param>${val(cfg.odooUser)}</param><param>${val(cfg.odooKey)}</param><param>${val({})}</param>`
+  );
+  if (!uid || uid === false) throw new Error('Autenticación fallida — verifica credenciales en Vercel');
+  return uid;
 }
 
 async function odooSearch(model, domain) {
-  const res = await odooCall(model, 'search', [domain], { limit: 5 });
+  const cfg = await getCfg();
+  const res = await xmlrpc('/xmlrpc/2/object', 'execute_kw',
+    `<param>${val(cfg.odooDb)}</param><param>${val(odooUid)}</param><param>${val(cfg.odooKey)}</param>` +
+    `<param>${val(model)}</param><param>${val('search')}</param>` +
+    `<param><value><array><data>${val(domain)}</data></array></value></param>`
+  );
   return Array.isArray(res) ? res : [];
 }
 
 async function odooCreate(model, data) {
-  return odooCall(model, 'create', [data]);
+  const cfg = await getCfg();
+  return xmlrpc('/xmlrpc/2/object', 'execute_kw',
+    `<param>${val(cfg.odooDb)}</param><param>${val(odooUid)}</param><param>${val(cfg.odooKey)}</param>` +
+    `<param>${val(model)}</param><param>${val('create')}</param>` +
+    `<param><value><array><data>${val(data)}</data></array></value></param>`
+  );
 }
 
 async function findOrCreatePartner(supplier) {
@@ -548,7 +547,7 @@ async function findOrCreatePartner(supplier) {
   if (ids.length) return ids[0];
   lg(`Proveedor no encontrado, creando: ${name}`, 'warn');
   return odooCreate('res.partner', {
-    name, supplier_rank:1,
+    name, supplier_rank: 1,
     street: supplier?.address || false,
     email:  supplier?.email   || false,
     phone:  supplier?.phone   || false,
@@ -576,7 +575,7 @@ async function buildOdooLines(lines) {
       const ids = await odooSearch('product.product', [['name','ilike',ln.description.substring(0,30)]]);
       if (ids.length) { productId = ids[0]; lg('Producto encontrado por nombre', 'ok'); }
     }
-    if (!productId) lg(`Sin producto coincidente (${ln.item_code||ln.description}), línea sin producto`, 'warn');
+    if (!productId) lg(`Sin producto (${ln.item_code||ln.description}), línea sin producto`, 'warn');
     result.push([0, 0, {
       product_id: productId || false,
       name: ln.description || ln.item_code || 'Producto',
@@ -587,6 +586,16 @@ async function buildOdooLines(lines) {
   }
   return result;
 }
+
+function parseXmlRpc(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  const fault = doc.querySelector('fault');
+  if (fault) throw new Error(doc.querySelector('fault string')?.textContent || 'Error XML-RPC');
+  const el = doc.querySelector('methodResponse > params > param > value');
+  if (!el) throw new Error('Respuesta XML-RPC inválida — ' + xml.substring(0,100));
+  return pv(el);
+}
+function pv(el){const c=el.children[0];if(!c)return el.textContent.trim();switch(c.tagName){case 'int':case 'i4':case 'i8':return parseInt(c.textContent);case 'double':return parseFloat(c.textContent);case 'boolean':return c.textContent.trim()==='1';case 'string':return c.textContent;case 'nil':return false;case 'array':{const d=c.querySelector('data');return d?[...d.children].map(pv):[];}case 'struct':{const o={};c.querySelectorAll(':scope > member').forEach(m=>{const k=m.querySelector('name')?.textContent,vv=m.querySelector('value');if(k&&vv)o[k]=pv(vv);});return o;}default:return c.textContent;}}
 
 function buildUBL(d){const cur=d.currency||'USD',lines=d.lines||[];const tax=Number(d.tax_amount||0).toFixed(2),sub=Number(d.subtotal||d.total||0).toFixed(2),tot=Number(d.total||0).toFixed(2);const today=new Date().toISOString().split('T')[0];const lx=lines.map((ln,i)=>`\n  <cac:InvoiceLine>\n    <cbc:ID>${i+1}</cbc:ID>\n    <cbc:InvoicedQuantity unitCode="${ln.unit||'EA'}">${ln.quantity}</cbc:InvoicedQuantity>\n    <cbc:LineExtensionAmount currencyID="${cur}">${Number(ln.total).toFixed(2)}</cbc:LineExtensionAmount>\n    <cac:Item><cbc:Description>${x(ln.description)}</cbc:Description>${ln.item_code?`<cac:SellersItemIdentification><cbc:ID>${x(ln.item_code)}</cbc:ID></cac:SellersItemIdentification>`:''}</cac:Item>\n    <cac:Price><cbc:PriceAmount currencyID="${cur}">${Number(ln.unit_price).toFixed(2)}</cbc:PriceAmount></cac:Price>\n  </cac:InvoiceLine>`).join('');return`<?xml version="1.0" encoding="UTF-8"?>\n<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">\n  <cbc:UBLVersionID>2.1</cbc:UBLVersionID>\n  <cbc:ID>${x(d.invoice_number||'INV-'+today)}</cbc:ID>\n  <cbc:IssueDate>${d.invoice_date||today}</cbc:IssueDate>\n  <cbc:DueDate>${d.due_date||d.invoice_date||today}</cbc:DueDate>\n  <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>\n  <cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>\n  <cac:TaxTotal><cbc:TaxAmount currencyID="${cur}">${tax}</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount currencyID="${cur}">${sub}</cbc:TaxableAmount><cbc:TaxAmount currencyID="${cur}">${tax}</cbc:TaxAmount><cac:TaxCategory><cbc:ID>Z</cbc:ID><cbc:Percent>0</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>\n  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="${cur}">${sub}</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="${cur}">${sub}</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="${cur}">${tot}</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="${cur}">${tot}</cbc:PayableAmount></cac:LegalMonetaryTotal>\n  ${lx}\n</Invoice>`;}
 function x(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');}
