@@ -1,4 +1,4 @@
-export const config = { api: { bodyParser: false } };
+export const config = { api: { bodyParser: true } };
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -8,61 +8,31 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const odooUrl = process.env.ODOO_URL?.replace(/\/+$/, '');
+  const odooUrl = (process.env.ODOO_URL || '').replace(/\/+$/, '');
   if (!odooUrl) return res.status(500).json({ error: 'ODOO_URL no configurado' });
 
   const pathParts = req.query.path || [];
   const odooPath = '/' + (Array.isArray(pathParts) ? pathParts.join('/') : pathParts);
+  const fullUrl = odooUrl + odooPath;
 
   try {
-    const body = await new Promise((resolve, reject) => {
-      let data = '';
-      req.on('data', chunk => { data += chunk.toString(); });
-      req.on('end', () => resolve(data));
-      req.on('error', reject);
-    });
+    console.log('→ POST', fullUrl);
+    console.log('→ Body:', JSON.stringify(req.body).substring(0, 200));
 
-    console.log('→ Odoo URL:', `${odooUrl}${odooPath}`);
-    console.log('→ Body:', body.substring(0, 200));
-
-    const response = await fetch(`${odooUrl}${odooPath}`, {
+    const response = await fetch(fullUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'Accept': 'text/xml, application/xml',
-        'X-Odoo-Dbfilter': process.env.ODOO_DB || '',
-      },
-      body: body,
-      redirect: 'manual', // Don't follow redirects — catch them
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body),
     });
 
+    const data = await response.json();
     console.log('← Status:', response.status);
-    console.log('← Content-Type:', response.headers.get('content-type'));
+    console.log('← Result:', JSON.stringify(data).substring(0, 200));
 
-    // If Odoo redirected us, it means wrong URL or session issue
-    if (response.status === 301 || response.status === 302) {
-      const location = response.headers.get('location');
-      console.log('← Redirect to:', location);
-      return res.status(502).json({ error: `Odoo redirigió a: ${location}. Verifica ODOO_URL y ODOO_DB.` });
-    }
-
-    const text = await response.text();
-    console.log('← Response preview:', text.substring(0, 300));
-
-    // If Odoo returned HTML instead of XML, surface a clear error
-    if (text.trimStart().startsWith('<!DOCTYPE') || text.trimStart().startsWith('<html')) {
-      return res.status(502).json({
-        error: 'Odoo devolvió HTML en vez de XML. Verifica que ODOO_DB sea correcto.',
-        hint: `DB configurado: "${process.env.ODOO_DB}". Prueba con el subdominio exacto de tu Odoo.`,
-        htmlPreview: text.substring(0, 200),
-      });
-    }
-
-    res.setHeader('Content-Type', 'text/xml');
-    res.status(200).send(text);
+    res.status(200).json(data);
 
   } catch (err) {
-    console.error('Proxy error:', err);
+    console.error('Proxy error:', err.message);
     res.status(500).json({ error: err.message });
   }
 }
