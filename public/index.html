@@ -457,16 +457,19 @@ async function doSendOdoo() {
     const lines=await buildOdooLines(invoiceData.lines||[]);
 
     lg('Creando factura…');
+    // Create invoice header first (no lines - avoids XML-RPC nested array issue)
     const invoiceId=await odooCreate('account.move',{
       partner_id:partnerId,
+      move_type:'in_invoice',
       invoice_date:invoiceData.invoice_date||false,
       invoice_date_due:invoiceData.due_date||false,
       ref:invoiceData.invoice_number||'',
       currency_id:currencyId,
       narration:[invoiceData.trade_terms,invoiceData.notes].filter(Boolean).join(' | ')||false,
-      invoice_line_ids:lines,
-      move_type:'in_invoice',
     });
+    // Add lines separately via write()
+    lg('Agregando líneas…');
+    await odooWrite('account.move', invoiceId, { invoice_line_ids: lines });
 
     lg(`✓ Factura creada — ID: ${invoiceId}`,'ok');
     setStep(3);
@@ -508,7 +511,7 @@ function val(v) {
   if (typeof v === 'number') return `<value><double>${v}</double></value>`;
   if (typeof v === 'boolean') return `<value><boolean>${v?1:0}</boolean></value>`;
   if (Array.isArray(v)) return `<value><array><data>${v.map(val).join('')}</data></array></value>`;
-  if (typeof v === 'object' && v !== null) return `<value><struct>${Object.entries(v).map(([k,vv])=>`<member><n>${k}</n>${val(vv)}</member>`).join('')}</struct></value>`;
+  if (typeof v === 'object' && v !== null) return `<value><struct>${Object.entries(v).map(([k,vv])=>`<member><name>${k}</name>${val(vv)}</member>`).join('')}</struct></value>`;
   return `<value><string>${String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</string></value>`;
 }
 
@@ -529,6 +532,16 @@ async function odooSearch(model, domain) {
     `<param><value><array><data>${val(domain)}</data></array></value></param>`
   );
   return Array.isArray(res) ? res : [];
+}
+
+async function odooWrite(model, id, data) {
+  const cfg = await getCfg();
+  return xmlrpc('/xmlrpc/2/object', 'execute_kw',
+    `<param>${val(cfg.odooDb)}</param><param>${val(odooUid)}</param><param>${val(cfg.odooKey)}</param>` +
+    `<param>${val(model)}</param><param>${val('write')}</param>` +
+    `<param><value><array><data>${val([id])}</data></array></value></param>` +
+    `<param><value><array><data>${val(data)}</data></array></value></param>`
+  );
 }
 
 async function odooCreate(model, data) {
