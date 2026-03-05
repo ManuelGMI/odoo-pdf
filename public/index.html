@@ -608,10 +608,11 @@ async function odooAuth() {
 }
 
 async function odooSearch(model, domain) {
+  // XML-RPC search expects args as [[domain]] — domain wrapped in two arrays
   const res = await odooProxy('/xmlrpc/2/object', {
     rpc: 'execute_kw', uid: odooUid,
     model, method: 'search',
-    args: [domain], kwargs: { limit: 5 },
+    args: [[domain]], kwargs: { limit: 5 },
   });
   return Array.isArray(res) ? res : [];
 }
@@ -620,7 +621,7 @@ async function odooCreate(model, data) {
   return odooProxy('/xmlrpc/2/object', {
     rpc: 'execute_kw', uid: odooUid,
     model, method: 'create',
-    args: [data], kwargs: {},
+    args: [[data]], kwargs: {},
   });
 }
 
