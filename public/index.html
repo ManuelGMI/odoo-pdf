@@ -606,7 +606,7 @@ function val(v) {
   if (typeof v === 'boolean')  return `<value><boolean>${v?1:0}</boolean></value>`;
   if (typeof v === 'number' && Number.isInteger(v)) return `<value><int>${v}</int></value>`;
   if (typeof v === 'number')   return `<value><double>${v}</double></value>`;
-  if (typeof v === 'string')   return `<value><string>${v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</string></value>`;
+  if (typeof v === 'string')   return `<value><string>${v.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</string></value>`;
   if (Array.isArray(v))        return `<value><array><data>${v.map(val).join('')}</data></array></value>`;
   if (typeof v === 'object') {
     const entries = Object.entries(v);
@@ -626,20 +626,6 @@ async function odooAuth() {
 }
 
 async function odooSearch(model, domain) {
-  const cfg = await getCfg();
-  const searchParams =
-    `<param>${val(cfg.odooDb)}</param>` +
-    `<param>${val(odooUid)}</param>` +
-    `<param>${val(cfg.odooKey)}</param>` +
-    `<param>${val(model)}</param>` +
-    `<param>${val('search')}</param>` +
-    `<param><value><array><data>${val(domain)}</data></array></value></param>` +
-    `<param><value><struct><member><n>limit</n><value><int>5</int></value></member></struct></value></param>`;
-  console.log('SEARCH XML params:', searchParams);
-  const res = await xmlrpc('/xmlrpc/2/object', 'execute_kw', searchParams);
-  return Array.isArray(res) ? res : [];
-}
-async function odooSearch_DISABLED(model, domain) {
   const cfg = await getCfg();
   const res = await xmlrpc('/xmlrpc/2/object', 'execute_kw',
     `<param>${val(cfg.odooDb)}</param>` +
