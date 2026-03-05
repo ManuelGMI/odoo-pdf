@@ -571,7 +571,7 @@ async function doSendOdoo() {
     setStep(3);
 
     const cfg2 = await getCfg();
-    const link=`${cfg2.odooUrl}/odoo/accounting/vendor-bills/${invoiceId}`;
+    const link = `${cfg2.odooUrl}/odoo/accounting/vendor-bills/${invoiceId}`;
     const sb=document.getElementById('successBanner');
     sb.style.display='flex';
     document.getElementById('successMsg').innerHTML=`Creada como borrador (ID: ${invoiceId}). <a href="${link}" target="_blank">Abrir en Odoo →</a>`;
@@ -580,57 +580,89 @@ async function doSendOdoo() {
   btn.disabled=false; btn.innerHTML='Crear factura en Odoo';
 }
 
-// ── Odoo API (credentials injected server-side) ─────────
+// ── Odoo XML-RPC via /api/proxy ─────────────────────────
 let _cfg = null;
 async function getCfg() {
   if (!_cfg) _cfg = await (await fetch('/api/config')).json();
   return _cfg;
 }
 
-// Calls proxy — credentials never leave the server
-async function odooProxy(endpoint, rpcPayload) {
-  const r = await fetch(`/api/proxy${endpoint}`, {
+function xmlrpc(endpoint, method, params) {
+  return fetch(`/api/proxy${endpoint}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(rpcPayload),
+    headers: { 'Content-Type': 'text/xml' },
+    body: `<?xml version="1.0"?><methodCall><methodName>${method}</methodName><params>${params}</params></methodCall>`
+  }).then(async r => {
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      throw new Error(err.error || `HTTP ${r.status}`);
+    }
+    return parseXmlRpc(await r.text());
   });
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
-    throw new Error(err.error || `HTTP ${r.status}`);
+}
+
+function val(v) {
+  if (v === false || v === null || v === undefined) return '<value><boolean>0</boolean></value>';
+  if (typeof v === 'boolean')  return `<value><boolean>${v?1:0}</boolean></value>`;
+  if (typeof v === 'number' && Number.isInteger(v)) return `<value><int>${v}</int></value>`;
+  if (typeof v === 'number')   return `<value><double>${v}</double></value>`;
+  if (typeof v === 'string')   return `<value><string>${v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</string></value>`;
+  if (Array.isArray(v))        return `<value><array><data>${v.map(val).join('')}</data></array></value>`;
+  if (typeof v === 'object') {
+    const entries = Object.entries(v);
+    if (!entries.length) return '<value><struct></struct></value>';
+    return `<value><struct>${entries.map(([k,vv])=>`<member><n>${k}</n>${val(vv)}</member>`).join('')}</struct></value>`;
   }
-  return parseXmlRpc(await r.text());
+  return `<value><string>${String(v)}</string></value>`;
 }
 
 async function odooAuth() {
-  const uid = await odooProxy('/xmlrpc/2/common', { rpc: 'authenticate' });
+  const cfg = await getCfg();
+  const uid = await xmlrpc('/xmlrpc/2/common', 'authenticate',
+    `<param>${val(cfg.odooDb)}</param><param>${val(cfg.odooUser)}</param><param>${val(cfg.odooKey)}</param><param><value><struct></struct></value></param>`
+  );
   if (!uid || uid === false) throw new Error('Autenticación fallida — verifica credenciales en Vercel');
   return uid;
 }
 
 async function odooSearch(model, domain) {
-  // XML-RPC search expects args as [[domain]] — domain wrapped in two arrays
-  const res = await odooProxy('/xmlrpc/2/object', {
-    rpc: 'execute_kw', uid: odooUid,
-    model, method: 'search',
-    args: [[domain]], kwargs: { limit: 5 },
-  });
+  const cfg = await getCfg();
+  const res = await xmlrpc('/xmlrpc/2/object', 'execute_kw',
+    `<param>${val(cfg.odooDb)}</param>` +
+    `<param>${val(odooUid)}</param>` +
+    `<param>${val(cfg.odooKey)}</param>` +
+    `<param>${val(model)}</param>` +
+    `<param>${val('search')}</param>` +
+    `<param><value><array><data>${val(domain)}</data></array></value></param>` +
+    `<param><value><struct><member><n>limit</n><value><int>5</int></value></member></struct></value></param>`
+  );
   return Array.isArray(res) ? res : [];
 }
 
 async function odooCreate(model, data) {
-  return odooProxy('/xmlrpc/2/object', {
-    rpc: 'execute_kw', uid: odooUid,
-    model, method: 'create',
-    args: [[data]], kwargs: {},
-  });
+  const cfg = await getCfg();
+  return xmlrpc('/xmlrpc/2/object', 'execute_kw',
+    `<param>${val(cfg.odooDb)}</param>` +
+    `<param>${val(odooUid)}</param>` +
+    `<param>${val(cfg.odooKey)}</param>` +
+    `<param>${val(model)}</param>` +
+    `<param>${val('create')}</param>` +
+    `<param><value><array><data>${val(data)}</data></array></value></param>` +
+    `<param><value><struct></struct></value></param>`
+  );
 }
 
 async function odooWrite(model, id, data) {
-  return odooProxy('/xmlrpc/2/object', {
-    rpc: 'execute_kw', uid: odooUid,
-    model, method: 'write',
-    args: [[id], data], kwargs: {},
-  });
+  const cfg = await getCfg();
+  return xmlrpc('/xmlrpc/2/object', 'execute_kw',
+    `<param>${val(cfg.odooDb)}</param>` +
+    `<param>${val(odooUid)}</param>` +
+    `<param>${val(cfg.odooKey)}</param>` +
+    `<param>${val(model)}</param>` +
+    `<param>${val('write')}</param>` +
+    `<param><value><array><data><value><array><data>${val(id)}</data></array></value>${val(data)}</data></array></value></param>` +
+    `<param><value><struct></struct></value></param>`
+  );
 }
 
 async function findOrCreatePartner(supplier) {
@@ -684,7 +716,7 @@ function parseXmlRpc(xml) {
   const fault = doc.querySelector('fault');
   if (fault) throw new Error(doc.querySelector('fault string')?.textContent || 'Error XML-RPC');
   const el = doc.querySelector('methodResponse > params > param > value');
-  if (!el) throw new Error('Respuesta XML-RPC inválida — ' + xml.substring(0, 100));
+  if (!el) throw new Error('Respuesta XML-RPC inválida: ' + xml.substring(0, 100));
   return pv(el);
 }
 function pv(el){const c=el.children[0];if(!c)return el.textContent.trim();switch(c.tagName){case 'int':case 'i4':case 'i8':return parseInt(c.textContent);case 'double':return parseFloat(c.textContent);case 'boolean':return c.textContent.trim()==='1';case 'string':return c.textContent;case 'nil':return false;case 'array':{const d=c.querySelector('data');return d?[...d.children].map(pv):[];}case 'struct':{const o={};c.querySelectorAll(':scope > member').forEach(m=>{const k=m.querySelector('name')?.textContent,vv=m.querySelector('value');if(k&&vv)o[k]=pv(vv);});return o;}default:return c.textContent;}}
