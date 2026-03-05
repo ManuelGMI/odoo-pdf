@@ -611,7 +611,7 @@ function val(v) {
   if (typeof v === 'object') {
     const entries = Object.entries(v);
     if (!entries.length) return '<value><struct></struct></value>';
-    return `<value><struct>${entries.map(([k,vv])=>`<member><n>${k}</n>${val(vv)}</member>`).join('')}</struct></value>`;
+    return `<value><struct>${entries.map(([k,vv])=>`<member><name>${k}</name>${val(vv)}</member>`).join('')}</struct></value>`;
   }
   return `<value><string>${String(v)}</string></value>`;
 }
@@ -634,7 +634,7 @@ async function odooSearch(model, domain) {
     `<param>${val(model)}</param>` +
     `<param>${val('search')}</param>` +
     `<param><value><array><data>${val(domain)}</data></array></value></param>` +
-    `<param><value><struct><member><n>limit</n><value><int>5</int></value></member></struct></value></param>`
+    `<param><value><struct><member><name>limit</name><value><int>5</int></value></member></struct></value></param>`
   );
   return Array.isArray(res) ? res : [];
 }
